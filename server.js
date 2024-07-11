@@ -1,54 +1,74 @@
-const express = require("express"); // Импортируем Express для создания веб-сервера
-const multer = require("multer"); // Импортируем Multer для обработки загрузки файлов
-const { exec } = require("child_process"); // Импортируем exec из child_process для выполнения команд CLI
-const fs = require("fs"); // Импортируем модуль fs для работы с файловой системой
-const path = require("path"); // Импортируем модуль path для работы с путями файлов
+const express = require("express"); // Подключаем Express.js для создания сервера
+const multer = require("multer"); // Подключаем Multer для обработки файлов, загружаемых на сервер
+const { exec } = require("child_process"); // Подключаем модуль child_process для выполнения команд в терминале
+const fs = require("fs"); // Подключаем модуль fs для работы с файловой системой
+const path = require("path"); // Подключаем модуль path для работы с путями к файлам и директориям
+const cors = require("cors"); // Подключаем CORS для обеспечения работы с клиентами на другом домене
 
 const app = express(); // Создаем экземпляр приложения Express
-const upload = multer({ dest: "uploads/" }); // Настраиваем Multer для сохранения загруженных файлов в папку uploads
+app.use(cors()); // Используем CORS middleware для разрешения CORS запросов
 
-// Обрабатываем POST-запрос на маршруте /compress
+const upload = multer({ dest: "uploads/" }); // Настраиваем Multer для временного сохранения загруженных файлов в 'uploads/' директорию
+
 app.post("/compress", upload.single("image"), (req, res) => {
-  const inputPath = req.file.path; // Получаем путь к загруженному файлу
-  const outputPath = `compressed_${req.file.filename}.avif`; // Определяем путь для сжатого файла
+  // Обработчик POST запроса на /compress
 
-  // Формируем команду для выполнения avif CLI
-  const avifCommand = `avif ${inputPath} -o ${outputPath}`;
+  const inputPath = req.file.path; // Получаем путь к загруженному файлу из запроса
+  const outputDir = "compressed_images"; // Указываем директорию для сохранения сжатых изображений
+  const outputPath = path.join(outputDir, `${req.file.filename}.avif`); // Формируем путь к выходному файлу AVIF
 
-  // Выполняем команду avif CLI
+  // Создаем выходную директорию, если она не существует
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir);
+  }
+
+  const avifCommand = `avif --input="${inputPath}" --output="${outputDir}/" --append-ext`;
+
+  console.log(`Executing command: ${avifCommand}`);
+
   exec(avifCommand, (error, stdout, stderr) => {
     if (error) {
-      // Если есть ошибка, выводим её в консоль и отправляем статус 500 клиенту
       console.error(`Error: ${error.message}`);
       return res.status(500).send("Error compressing image");
     }
+
     if (stderr) {
-      // Если есть сообщения в stderr, выводим их в консоль
       console.error(`Stderr: ${stderr}`);
     }
-    console.log(`Stdout: ${stdout}`); // Выводим stdout для информации
 
-    // Отправляем сжатое изображение клиенту
-    res.sendFile(path.resolve(outputPath), (err) => {
+    console.log(`Stdout: ${stdout}`);
+
+    fs.access(outputPath, fs.constants.F_OK, (err) => {
+      // Проверяем, существует ли конечный файл .avif
+
       if (err) {
-        // Если есть ошибка при отправке файла, выводим её в консоль и отправляем статус 500 клиенту
-        console.error(err);
-        res.status(500).send("Error sending compressed image");
+        // Если конечный файл не найден
+        console.error(`File not found: ${outputPath}`); // Выводим сообщение об ошибке в консоль
+        console.error(`Possible issues with avif CLI execution`); // Выводим дополнительную информацию для отладки
+        return res.status(404).send("Compressed image not found"); // Отправляем клиенту статус 404 и сообщение об ошибке
       }
 
-      // Удаляем исходный и сжатый файлы из файловой системы
-      fs.unlink(inputPath, (err) => {
-        if (err) console.error(err);
-      });
-      fs.unlink(outputPath, (err) => {
-        if (err) console.error(err);
+      // Отправляем сжатый файл клиенту
+      res.sendFile(path.resolve(outputPath), (err) => {
+        if (err) {
+          // Если произошла ошибка при отправке файла клиенту
+          console.error(err); // Выводим ошибку в консоль для отладки
+          res.status(500).send("Error sending compressed image"); // Отправляем клиенту статус 500 и сообщение об ошибке
+        }
+
+        // Удаляем временные файлы
+        fs.unlink(inputPath, (err) => {
+          if (err) console.error(err); // Выводим ошибку удаления в консоль для отладки
+        });
+        fs.unlink(outputPath, (err) => {
+          if (err) console.error(err); // Выводим ошибку удаления в консоль для отладки
+        });
       });
     });
   });
 });
 
-// Задаем порт для сервера
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 8000; // Задаем порт для сервера
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`); // Запускаем сервер и выводим сообщение о запуске
+  console.log(`Server is running on port ${PORT}`); // Выводим сообщение в консоль при запуске сервера
 });
