@@ -12,7 +12,7 @@ app.use(cors());
 
 const upload = multer({ dest: "uploads/" });
 
-app.post("/compress", upload.array("images", 10), (req, res) => {
+app.post("/compress", upload.array("images", 10), async (req, res) => {
   const outputDir = "compressed_images";
 
   if (!fs.existsSync(outputDir)) {
@@ -25,18 +25,22 @@ app.post("/compress", upload.array("images", 10), (req, res) => {
   let processedCount = 0; // Счетчик обработанных файлов
 
   inputFiles.forEach((file) => {
-    const inputPath = file.path; // Путь к временному файлу
-    const outputFileName = `${file.filename}.avif`; // Имя сжатого файла
-    const outputPath = path.join(outputDir, outputFileName); // Полный путь к сжатому файлу
+    const inputPath = file.path;
+    const outputFileName = `${file.filename}.avif`;
+    const outputPath = path.join(outputDir, outputFileName);
+    outputFiles.push(outputPath);
 
-    outputFiles.push(outputPath); // Добавляем путь к сжатому файлу в массив
+    // Параметры avif cli
+    const quality = req.body.quality || 50;
+    const effort = req.body.effort || 4;
+    const lossless = req.body.lossless || false;
+    const chromaSubsampling = req.body.chromaSubsampling || "4:4:4";
+    const keepMetadata = req.body.keepMetadata || false;
 
-    // Команда для выполнения сжатия с использованием avif
-    const avifCommand = `avif --input="${inputPath}" --output="${outputDir}/" --append-ext --overwrite`;
+    const avifCommand = `npx avif --input="${inputPath}" --output="${outputDir}/" --append-ext --overwrite --quality=${quality} --effort=${effort} --lossless=${lossless} --chroma-subsampling=${chromaSubsampling} --keep-metadata=${keepMetadata}`;
 
     console.log(`Executing command: ${avifCommand}`);
 
-    // Выполняем команду сжатия
     exec(avifCommand, (error, stdout, stderr) => {
       if (error) {
         console.error(`Error: ${error.message}`);
@@ -49,23 +53,20 @@ app.post("/compress", upload.array("images", 10), (req, res) => {
 
       processedCount++;
 
-      // Если все файлы обработаны
       if (processedCount === inputFiles.length) {
-        const zipFilename = `compressed_images-${uuidv4()}.zip`; // Уникальное имя для архива
-        const zipPath = path.join(outputDir, zipFilename); // Путь к архиву
+        // Если все файлы обработаны
 
-        const output = fs.createWriteStream(zipPath); // Создаем поток для записи архива
+        const zipFilename = `compressed_images-${uuidv4()}.zip`; // Генерируем уникальное имя для архива
+        const zipPath = path.join(outputDir, zipFilename);
+        const output = fs.createWriteStream(zipPath);
         const archive = archiver("zip", {
-          zlib: { level: 9 }, // Уровень сжатия
+          zlib: { level: 9 },
         });
 
         output.on("close", () => {
-          // Когда архивация завершена
-
           console.log(`${archive.pointer()} total bytes`);
           console.log("Archiver has been finalized and the output file descriptor has closed.");
 
-          // Отправляем архив клиенту для скачивания
           res.download(zipPath, (err) => {
             if (err) {
               console.error(err);
@@ -84,7 +85,7 @@ app.post("/compress", upload.array("images", 10), (req, res) => {
               });
             });
 
-            // Удаляем временный архив после отправки клиенту
+            // Удаляем временный архив
             fs.unlink(zipPath, (err) => {
               if (err) console.error(`Failed to delete archive: ${err}`);
               else console.log(`Deleted archive: ${zipPath}`);
@@ -106,14 +107,13 @@ app.post("/compress", upload.array("images", 10), (req, res) => {
           throw err;
         });
 
-        archive.pipe(output); // Подключаем поток архивации к потоку вывода
+        archive.pipe(output);
 
-        // Добавляем все сжатые файлы в архив
         outputFiles.forEach((file) => {
           archive.file(file, { name: path.basename(file) });
         });
 
-        archive.finalize(); // Завершаем процесс архивации
+        archive.finalize();
       }
     });
   });
