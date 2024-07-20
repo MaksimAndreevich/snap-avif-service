@@ -10,22 +10,30 @@ const { onCloseArchiveHandler, onEndArchiveHandler, onWarningArchiveHandler, onE
 const { INPUT_FOLDER_NAME, OUTPUT_FOLDER_NAME, MAX_FILES_ENTERED, ARCHIVE_FORMAT, ARCHIVE_LEVEL } = require("./lib/constants");
 
 const app = express();
-app.use(
-  cors({
-    exposedHeaders: ["x-stats"],
-  })
-);
+
+const corsOptions = {
+  origin: "https://snap-avif.vercel.app",
+  methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
+  credentials: true,
+  optionsSuccessStatus: 204,
+  exposedHeaders: ["x-stats"],
+};
+
+app.use(cors(corsOptions));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const upload = multer({ dest: INPUT_FOLDER_NAME });
 
 app.post("/compress", upload.array("images", MAX_FILES_ENTERED), async (req, res) => {
+  res.header("Access-Control-Allow-Origin", "*");
+
   if (req.files.length === 0) {
     return res.status(500).send("Has not files");
   }
 
-  const outputDir = OUTPUT_FOLDER_NAME;
+  const outputDir = `/tmp/${OUTPUT_FOLDER_NAME}`;
 
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir);

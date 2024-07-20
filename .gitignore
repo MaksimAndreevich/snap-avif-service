@@ -1,3 +1,4 @@
 node_modules/
 uploads/
 compressed_images/
+.vercel
