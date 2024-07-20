@@ -10,13 +10,21 @@ const { onCloseArchiveHandler, onEndArchiveHandler, onWarningArchiveHandler, onE
 const { INPUT_FOLDER_NAME, OUTPUT_FOLDER_NAME, MAX_FILES_ENTERED, ARCHIVE_FORMAT, ARCHIVE_LEVEL } = require("./lib/constants");
 
 const app = express();
-app.use(cors());
+app.use(
+  cors({
+    exposedHeaders: ["x-stats"],
+  })
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 const upload = multer({ dest: INPUT_FOLDER_NAME });
 
 app.post("/compress", upload.array("images", MAX_FILES_ENTERED), async (req, res) => {
+  if (req.files.length === 0) {
+    return res.status(500).send("Has not files");
+  }
+
   const outputDir = OUTPUT_FOLDER_NAME;
 
   if (!fs.existsSync(outputDir)) {
@@ -27,6 +35,9 @@ app.post("/compress", upload.array("images", MAX_FILES_ENTERED), async (req, res
   const outputFiles = [];
 
   let processedCount = 0;
+  let totalOriginalSize = 0;
+  let totalCompressedSize = 0;
+  const startTime = Date.now();
 
   inputFiles.forEach((file) => {
     const inputPath = file.path;
@@ -48,11 +59,18 @@ app.post("/compress", upload.array("images", MAX_FILES_ENTERED), async (req, res
       verbose: true,
     };
 
-    convert(options).then((result) => {
+    totalOriginalSize += file.size;
+
+    convert(options).then(async (result) => {
       if (result) {
+        const compressedFileSize = (await fs.promises.stat(outputPath)).size;
+        totalCompressedSize += compressedFileSize;
+
         processedCount++; // Увеличиваем счетчик обработанных файлов
 
         if (processedCount === inputFiles.length) {
+          const endTime = Date.now();
+
           // Если все файлы обработаны
           const zipFilename = `${OUTPUT_FOLDER_NAME}-${uuidv4()}.zip`; // Генерируем уникальное имя для архива
           const zipPath = path.join(outputDir, zipFilename); // Полный путь к архиву
@@ -62,7 +80,17 @@ app.post("/compress", upload.array("images", MAX_FILES_ENTERED), async (req, res
             zlib: { level: ARCHIVE_LEVEL },
           }); // Настраиваем архиватор
 
-          output.on("close", () => onCloseArchiveHandler(res, zipPath, inputFiles, outputFiles));
+          const stats = {
+            totalOriginalSize,
+            totalCompressedSize,
+            totalTime: endTime - startTime,
+            percentageReduction: ((totalOriginalSize - totalCompressedSize) / totalOriginalSize) * 100,
+            numberOfFiles: inputFiles.length,
+            averageOriginalSize: totalOriginalSize / inputFiles.length,
+            averageCompressedSize: totalCompressedSize / inputFiles.length,
+          };
+
+          output.on("close", () => onCloseArchiveHandler(res, zipPath, inputFiles, outputFiles, stats));
           output.on("end", () => onEndArchiveHandler());
           archive.on("warning", (err) => onWarningArchiveHandler(err));
           archive.on("error", (err) => onErrorArchiveHandler(err));
